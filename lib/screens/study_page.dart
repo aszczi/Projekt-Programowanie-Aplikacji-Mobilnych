@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flip_card/flip_card.dart';
 import 'package:http/http.dart' as http;
-import '../managers/favorites_manager.dart'; 
+import '../managers/favorites_manager.dart';
+import '../data/flashcard_data.dart'; 
 
 class StudyPage extends StatefulWidget {
   final String categoryName;
@@ -32,97 +34,150 @@ class _StudyPageState extends State<StudyPage> {
   }
 
   Future<void> _fetchData() async {
-    final word = widget.englishWords[_currentIndex].toLowerCase();
+  final word = widget.englishWords[_currentIndex].toLowerCase();
 
-    setState(() {
-      _isLoading = true;
-      _currentDefinition = null;
-      _currentPolishTranslation = null;
-      _currentPhonetic = null;
-      _currentExample = null;
-      _currentSynonyms = [];
-    });
+  setState(() {
+    _isLoading = true;
+    _currentDefinition = null;
+    _currentPolishTranslation = null;
+    _currentPhonetic = null;
+    _currentExample = null;
+    _currentSynonyms = [];
+  });
 
-    try {
-      final url = Uri.parse('https://freedictionaryapi.com/api/v1/entries/en/$word?translations=true');
-      final response = await http.get(url);
+  String def = "Brak definicji.";
+  String plTrans = "Brak tłumaczenia";
+  String? phonetic;
+  String? example;
+  List<String> synonyms = [];
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
+  bool translationSuccess = false;
+  bool coreSuccess = false;
 
-        String def = "Brak definicji.";
-        String plTrans = "Brak tłumaczenia";
-        String? phonetic;
-        String? example;
-        List<String> synonyms = [];
+  //API z tłumaczeniami
+  try {
+    final urlTranslations = Uri.parse(
+      'https://freedictionaryapi.com/api/v1/entries/en/$word?translations=true',
+    );
+    final responseTranslations = await http.get(urlTranslations);
 
-        if (data['entries'] != null && (data['entries'] as List).isNotEmpty) {
-          var entry = data['entries'][0];
-          if (entry['pronunciations'] != null) {
-            for (var p in entry['pronunciations']) {
-              if (p['text'] != null) {
-                phonetic = p['text'];
-                break;
-              }
-            }
-          }
-          if (entry['senses'] != null && (entry['senses'] as List).isNotEmpty) {
-            var sense = entry['senses'][0];
-            def = sense['definition'] ?? "Brak";
-            if (sense['examples'] != null && (sense['examples'] as List).isNotEmpty) {
-              example = sense['examples'][0].toString();
-            }
-            if (sense['synonyms'] != null) {
-              synonyms = List<String>.from(sense['synonyms']);
-            }
-          }
-        }
+    if (responseTranslations.statusCode == 200) {
+      translationSuccess = true;
+      final Map<String, dynamic> data =
+          json.decode(responseTranslations.body) as Map<String, dynamic>;
 
-        bool foundTrans = false;
-        if (data['entries'] != null) {
-          for (var entry in data['entries']) {
-            if (entry['senses'] != null) {
-              for (var sense in entry['senses']) {
-                if (sense['translations'] != null) {
-                  for (var trans in sense['translations']) {
-                    if (trans['language'] != null && trans['language']['code'] == 'pl') {
-                      plTrans = trans['word'];
-                      foundTrans = true;
-                      break;
-                    }
+      bool foundTrans = false;
+      if (data['entries'] != null) {
+        for (var entry in data['entries']) {
+          if (entry['senses'] != null) {
+            for (var sense in entry['senses']) {
+              if (sense['translations'] != null) {
+                for (var trans in sense['translations']) {
+                  if (trans['language'] != null &&
+                      trans['language']['code'] == 'pl') {
+                    plTrans = trans['word'];
+                    foundTrans = true;
+                    break;
                   }
                 }
-                if (foundTrans) break;
               }
+              if (foundTrans) break;
             }
-            if (foundTrans) break;
+          }
+          if (foundTrans) break;
+        }
+      }
+    } else {
+      debugPrint(
+          "Błąd API (translations=true): ${responseTranslations.statusCode}");
+    }
+  } catch (e) {
+    debugPrint("Błąd połączenia (translations=true): $e");
+  }
+
+  //API podstawowe 
+  try {
+    final urlCore =
+        Uri.parse('https://freedictionaryapi.com/api/v1/entries/en/$word');
+    final responseCore = await http.get(urlCore);
+
+    if (responseCore.statusCode == 200) {
+      coreSuccess = true;
+      final Map<String, dynamic> dataCore =
+          json.decode(responseCore.body) as Map<String, dynamic>;
+
+      if (dataCore['entries'] != null &&
+          (dataCore['entries'] as List).isNotEmpty) {
+        var entry = dataCore['entries'][0];
+
+
+        if (entry['phonetic'] != null) {
+          phonetic = entry['phonetic'];
+        }
+
+        if (phonetic == null && entry['phonetics'] != null) {
+          for (var p in entry['phonetics']) {
+            if (p['text'] != null && p['text'].toString().isNotEmpty) {
+              phonetic = p['text'];
+              break;
+            }
           }
         }
 
-        if (mounted) {
-          setState(() {
-            _currentDefinition = def;
-            _currentPolishTranslation = plTrans;
-            _currentPhonetic = phonetic;
-            _currentExample = example;
-            _currentSynonyms = synonyms.take(5).toList();
-          });
+        if (phonetic == null && entry['pronunciations'] != null) {
+          for (var p in entry['pronunciations']) {
+            if (p['text'] != null) {
+              phonetic = p['text'];
+              break;
+            }
+          }
         }
-      } else {
-        if (mounted) setState(() {
+
+        // definicja, przykład, synonimy
+        if (entry['senses'] != null &&
+            (entry['senses'] as List).isNotEmpty) {
+          var sense = entry['senses'][0];
+          def = sense['definition'] ?? "Brak";
+          if (sense['examples'] != null &&
+              (sense['examples'] as List).isNotEmpty) {
+            example = sense['examples'][0].toString();
+          }
+          if (sense['synonyms'] != null) {
+            synonyms = List<String>.from(sense['synonyms']);
+          }
+        }
+      }
+    } else {
+      debugPrint("Błąd API (core): ${responseCore.statusCode}");
+    }
+  } catch (e) {
+    debugPrint("Błąd połączenia (core): $e");
+  } finally {
+    if (!translationSuccess && !coreSuccess) {
+      //Przypadek gdy oba API padły
+      if (mounted) {
+        setState(() {
           _currentDefinition = "Błąd API";
           _currentPolishTranslation = "Błąd";
+          _isLoading = false;
         });
       }
-    } catch (e) {
-      if (mounted) setState(() {
-        _currentDefinition = "Błąd połączenia";
-        _currentPolishTranslation = "Błąd sieci";
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _currentDefinition = def;
+        _currentPolishTranslation = plTrans;
+        _currentPhonetic = phonetic;
+        _currentExample = example;
+        _currentSynonyms = synonyms.take(5).toList();
+        _isLoading = false;
       });
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
+}
+
 
   void _nextCard() {
     if (_currentIndex < widget.englishWords.length - 1) {
@@ -155,21 +210,33 @@ class _StudyPageState extends State<StudyPage> {
             children: [
               Center(child: Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)))),
               const SizedBox(height: 20),
+              
+            
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(widget.englishWords[_currentIndex], style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor)),
-                  if (_currentPhonetic != null) Text(_currentPhonetic!, style: const TextStyle(fontSize: 18, fontStyle: FontStyle.italic, color: Colors.grey)),
+                  Text(
+                    widget.englishWords[_currentIndex], 
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor)
+                  ),
+                  
+              
+                  if (_currentPhonetic != null) 
+                    Text(
+                      _currentPhonetic!, 
+                      style: const TextStyle(fontSize: 18, fontStyle: FontStyle.italic, color: Colors.grey)
+                    ),
                 ],
               ),
+              
               const Divider(height: 30),
               const Text("PRZYKŁAD UŻYCIA:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 1)),
               const SizedBox(height: 5),
-              Text(_currentExample != null ? '"$_currentExample"' : "Brak przykładu w API.", style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic)),
+              Text(_currentExample != null ? '"$_currentExample"' : "Brak przykładu z API.", style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic)),
               const SizedBox(height: 20),
               const Text("SYNONIMY:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 1)),
               const SizedBox(height: 10),
-              if (_currentSynonyms.isNotEmpty) Wrap(spacing: 8.0, runSpacing: 4.0, children: _currentSynonyms.map((syn) => Chip(label: Text(syn), backgroundColor: Theme.of(context).hintColor.withOpacity(0.2))).toList()) else const Text("Brak synonimów w API.", style: TextStyle(color: Colors.grey)),
+              if (_currentSynonyms.isNotEmpty) Wrap(spacing: 8.0, runSpacing: 4.0, children: _currentSynonyms.map((syn) => Chip(label: Text(syn), backgroundColor: Theme.of(context).hintColor.withOpacity(0.2))).toList()) else const Text("Brak synonimów.", style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 20),
             ],
           ),
