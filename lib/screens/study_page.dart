@@ -1,10 +1,6 @@
-import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flip_card/flip_card.dart';
-import 'package:http/http.dart' as http;
-import '../managers/favorites_manager.dart';
-import '../data/flashcard_data.dart'; 
+import '../viewmodels/study_view_model.dart'; 
 
 class StudyPage extends StatefulWidget {
   final String categoryName;
@@ -17,180 +13,23 @@ class StudyPage extends StatefulWidget {
 }
 
 class _StudyPageState extends State<StudyPage> {
-  int _currentIndex = 0;
-
-  String? _currentDefinition;
-  String? _currentPolishTranslation;
-  String? _currentPhonetic;
-  String? _currentExample;
-  List<String> _currentSynonyms = [];
-
-  bool _isLoading = false;
+  late StudyViewModel _viewModel;
 
   @override
   void initState() {
     super.initState();
-    _fetchData();
+
+    _viewModel = StudyViewModel(englishWords: widget.englishWords);
+    
+    _viewModel.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
-  Future<void> _fetchData() async {
-  final word = widget.englishWords[_currentIndex].toLowerCase();
-
-  setState(() {
-    _isLoading = true;
-    _currentDefinition = null;
-    _currentPolishTranslation = null;
-    _currentPhonetic = null;
-    _currentExample = null;
-    _currentSynonyms = [];
-  });
-
-  String def = "Brak definicji.";
-  String plTrans = "Brak tłumaczenia";
-  String? phonetic;
-  String? example;
-  List<String> synonyms = [];
-
-  bool translationSuccess = false;
-  bool coreSuccess = false;
-
-  //API z tłumaczeniami
-  try {
-    final urlTranslations = Uri.parse(
-      'https://freedictionaryapi.com/api/v1/entries/en/$word?translations=true',
-    );
-    final responseTranslations = await http.get(urlTranslations);
-
-    if (responseTranslations.statusCode == 200) {
-      translationSuccess = true;
-      final Map<String, dynamic> data =
-          json.decode(responseTranslations.body) as Map<String, dynamic>;
-
-      bool foundTrans = false;
-      if (data['entries'] != null) {
-        for (var entry in data['entries']) {
-          if (entry['senses'] != null) {
-            for (var sense in entry['senses']) {
-              if (sense['translations'] != null) {
-                for (var trans in sense['translations']) {
-                  if (trans['language'] != null &&
-                      trans['language']['code'] == 'pl') {
-                    plTrans = trans['word'];
-                    foundTrans = true;
-                    break;
-                  }
-                }
-              }
-              if (foundTrans) break;
-            }
-          }
-          if (foundTrans) break;
-        }
-      }
-    } else {
-      debugPrint(
-          "Błąd API (translations=true): ${responseTranslations.statusCode}");
-    }
-  } catch (e) {
-    debugPrint("Błąd połączenia (translations=true): $e");
-  }
-
-  //API podstawowe 
-  try {
-    final urlCore =
-        Uri.parse('https://freedictionaryapi.com/api/v1/entries/en/$word');
-    final responseCore = await http.get(urlCore);
-
-    if (responseCore.statusCode == 200) {
-      coreSuccess = true;
-      final Map<String, dynamic> dataCore =
-          json.decode(responseCore.body) as Map<String, dynamic>;
-
-      if (dataCore['entries'] != null &&
-          (dataCore['entries'] as List).isNotEmpty) {
-        var entry = dataCore['entries'][0];
-
-
-        if (entry['phonetic'] != null) {
-          phonetic = entry['phonetic'];
-        }
-
-        if (phonetic == null && entry['phonetics'] != null) {
-          for (var p in entry['phonetics']) {
-            if (p['text'] != null && p['text'].toString().isNotEmpty) {
-              phonetic = p['text'];
-              break;
-            }
-          }
-        }
-
-        if (phonetic == null && entry['pronunciations'] != null) {
-          for (var p in entry['pronunciations']) {
-            if (p['text'] != null) {
-              phonetic = p['text'];
-              break;
-            }
-          }
-        }
-
-        // definicja, przykład, synonimy
-        if (entry['senses'] != null &&
-            (entry['senses'] as List).isNotEmpty) {
-          var sense = entry['senses'][0];
-          def = sense['definition'] ?? "Brak";
-          if (sense['examples'] != null &&
-              (sense['examples'] as List).isNotEmpty) {
-            example = sense['examples'][0].toString();
-          }
-          if (sense['synonyms'] != null) {
-            synonyms = List<String>.from(sense['synonyms']);
-          }
-        }
-      }
-    } else {
-      debugPrint("Błąd API (core): ${responseCore.statusCode}");
-    }
-  } catch (e) {
-    debugPrint("Błąd połączenia (core): $e");
-  } finally {
-    if (!translationSuccess && !coreSuccess) {
-      //Przypadek gdy oba API padły
-      if (mounted) {
-        setState(() {
-          _currentDefinition = "Błąd API";
-          _currentPolishTranslation = "Błąd";
-          _isLoading = false;
-        });
-      }
-      return;
-    }
-
-    if (mounted) {
-      setState(() {
-        _currentDefinition = def;
-        _currentPolishTranslation = plTrans;
-        _currentPhonetic = phonetic;
-        _currentExample = example;
-        _currentSynonyms = synonyms.take(5).toList();
-        _isLoading = false;
-      });
-    }
-  }
-}
-
-
-  void _nextCard() {
-    if (_currentIndex < widget.englishWords.length - 1) {
-      setState(() { _currentIndex++; });
-      _fetchData();
-    }
-  }
-
-  void _previousCard() {
-    if (_currentIndex > 0) {
-      setState(() { _currentIndex--; });
-      _fetchData();
-    }
+  @override
+  void dispose() {
+    _viewModel.dispose();
+    super.dispose();
   }
 
   void _showMoreDetails() {
@@ -211,19 +50,17 @@ class _StudyPageState extends State<StudyPage> {
               Center(child: Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)))),
               const SizedBox(height: 20),
               
-            
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    widget.englishWords[_currentIndex], 
+                    _viewModel.currentWord, 
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor)
                   ),
                   
-              
-                  if (_currentPhonetic != null) 
+                  if (_viewModel.currentPhonetic != null) 
                     Text(
-                      _currentPhonetic!, 
+                      _viewModel.currentPhonetic!, 
                       style: const TextStyle(fontSize: 18, fontStyle: FontStyle.italic, color: Colors.grey)
                     ),
                 ],
@@ -232,11 +69,18 @@ class _StudyPageState extends State<StudyPage> {
               const Divider(height: 30),
               const Text("PRZYKŁAD UŻYCIA:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 1)),
               const SizedBox(height: 5),
-              Text(_currentExample != null ? '"$_currentExample"' : "Brak przykładu z API.", style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic)),
+              Text(_viewModel.currentExample != null ? '"${_viewModel.currentExample}"' : "Brak przykładu (sprawdź internet).", style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic)),
               const SizedBox(height: 20),
               const Text("SYNONIMY:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 1)),
               const SizedBox(height: 10),
-              if (_currentSynonyms.isNotEmpty) Wrap(spacing: 8.0, runSpacing: 4.0, children: _currentSynonyms.map((syn) => Chip(label: Text(syn), backgroundColor: Theme.of(context).hintColor.withOpacity(0.2))).toList()) else const Text("Brak synonimów.", style: TextStyle(color: Colors.grey)),
+              if (_viewModel.currentSynonyms.isNotEmpty) 
+                Wrap(
+                  spacing: 8.0, 
+                  runSpacing: 4.0, 
+                  children: _viewModel.currentSynonyms.map((syn) => Chip(label: Text(syn), backgroundColor: Theme.of(context).hintColor.withOpacity(0.2))).toList()
+                ) 
+              else 
+                const Text("Brak synonimów.", style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 20),
             ],
           ),
@@ -247,8 +91,7 @@ class _StudyPageState extends State<StudyPage> {
 
   @override
   Widget build(BuildContext context) {
-    final currentEnglishWord = widget.englishWords[_currentIndex];
-    final isFav = FavoritesManager.isFavorite(currentEnglishWord);
+    final isFav = _viewModel.isCurrentWordFavorite;
 
     return Scaffold(
       appBar: AppBar(
@@ -273,19 +116,19 @@ class _StudyPageState extends State<StudyPage> {
                 height: 400,
                 width: MediaQuery.of(context).size.width * 0.85,
                 child: FlipCard(
-                  key: ValueKey(_currentIndex),
+                  key: ValueKey(_viewModel.currentIndex),
                   direction: FlipDirection.HORIZONTAL,
                   front: _buildCardSide(
-                    mainText: currentEnglishWord,
-                    bottomText: _currentDefinition,
-                    isLoading: _isLoading,
+                    mainText: _viewModel.currentWord,
+                    bottomText: _viewModel.currentDefinition,
+                    isLoading: _viewModel.isLoading,
                     bgColor: const Color(0xFFF7A8D8).withOpacity(0.7),
                     textColor: Colors.black87,
                     label: "ANGIELSKI",
                     isFront: true,
                   ),
                   back: _buildCardSide(
-                    mainText: _isLoading ? "..." : (_currentPolishTranslation ?? "..."),
+                    mainText: _viewModel.isLoading ? "..." : (_viewModel.currentPolishTranslation ?? "..."),
                     bottomText: null,
                     isLoading: false,
                     bgColor: const Color(0xFFE0BBE4),
@@ -298,15 +141,27 @@ class _StudyPageState extends State<StudyPage> {
             ),
           ),
           const SizedBox(height: 10),
-          IconButton(iconSize: 60, icon: Icon(isFav ? Icons.star : Icons.star_border, color: isFav ? Colors.amber : const Color(0xFFE0BBE4)), onPressed: () { setState(() { FavoritesManager.toggleFavorite(currentEnglishWord); }); }),
+          IconButton(
+            iconSize: 60, 
+            icon: Icon(isFav ? Icons.star : Icons.star_border, color: isFav ? Colors.amber : const Color(0xFFE0BBE4)), 
+            onPressed: () => _viewModel.toggleFavorite(),
+          ),
           const SizedBox(height: 20),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                ElevatedButton(onPressed: _currentIndex > 0 ? _previousCard : null, style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300], foregroundColor: Colors.black87), child: const Text("Poprzednia")),
-                ElevatedButton(onPressed: _currentIndex < widget.englishWords.length - 1 ? _nextCard : null, style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300], foregroundColor: Colors.black87), child: const Text("Następna")),
+                ElevatedButton(
+                  onPressed: _viewModel.currentIndex > 0 ? _viewModel.previousCard : null, 
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300], foregroundColor: Colors.black87), 
+                  child: const Text("Poprzednia")
+                ),
+                ElevatedButton(
+                  onPressed: _viewModel.currentIndex < widget.englishWords.length - 1 ? _viewModel.nextCard : null, 
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[300], foregroundColor: Colors.black87), 
+                  child: const Text("Następna")
+                ),
               ],
             ),
           ),
